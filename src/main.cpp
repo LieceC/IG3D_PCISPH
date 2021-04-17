@@ -108,7 +108,7 @@ public:
             const Vec2f g = Vec2f(0, -9.8), const Real eta = 0.01, const Real gamma = 7.0) :
             _kernel(h), _nu(nu), _h(h), _d0(density),
             _g(g), _eta(eta), _gamma(gamma) {
-        _dt = 0.0073;
+        _dt = 0.0043;
         _m0 = _d0 * _h * _h;
         _c = std::fabs(_g.y) / _eta;
         _p0 = 6000000;
@@ -130,35 +130,23 @@ public:
         _t = static_cast<Real>(res_y) - 0.5 * _h;
 
         // sample a fluid mass
-        for (int j = -f_width / 4; j < f_height/4; ++j) {
-            for (int i = -f_width / 4; i < f_width/4; ++i) {
-                _pos.push_back(Vec2f(res_x / 2 + i + 0.25, 20+j + 0.25));
-                _pos.push_back(Vec2f(res_x / 2 + i + 0.75, 20+j + 0.25));
-                _pos.push_back(Vec2f(res_x / 2 + i + 0.25, 20+j + 0.75));
-                _pos.push_back(Vec2f(res_x / 2 + i + 0.75, 20+j + 0.75));
+        for (int j = -f_width / 4; j < f_height / 4; ++j) {
+            for (int i = -f_width / 4; i < f_width / 4; ++i) {
+                _pos.push_back(Vec2f(res_x / 2 + i + 0.25, 20 + j + 0.25));
+                _pos.push_back(Vec2f(res_x / 2 + i + 0.75, 20 + j + 0.25));
+                _pos.push_back(Vec2f(res_x / 2 + i + 0.25, 20 + j + 0.75));
+                _pos.push_back(Vec2f(res_x / 2 + i + 0.75, 20 + j + 0.75));
             }
         }
 
         for (int j = 0; j < 4; ++j) {
             for (int i = 0; i < res_x; ++i) {
-                _pos.push_back(Vec2f(i + 0.25,j + 0.25));
-                _pos.push_back(Vec2f(i + 0.75,j + 0.25));
-                _pos.push_back(Vec2f(i + 0.25,j + 0.75));
-                _pos.push_back(Vec2f(i + 0.75,j + 0.75));
+                _pos.push_back(Vec2f(i + 0.25, j + 0.25));
+                _pos.push_back(Vec2f(i + 0.75, j + 0.25));
+                _pos.push_back(Vec2f(i + 0.25, j + 0.75));
+                _pos.push_back(Vec2f(i + 0.75, j + 0.75));
             }
         }
-        nb_particles = _pos.size();
-        /**
-        //Create boundary particle
-        for (float i = 0; i < res_y - 1; i+=0.5) {
-            _pos.push_back(Vec2f(0.5, i + 0.5));
-            _pos.push_back(Vec2f(res_x - 0.5, i + 0.5));
-        }
-        for (float i = 0.5; i < res_x - 1; i+=0.5) {
-            _pos.push_back(Vec2f(i + 0.5, res_y - 0.5));
-            _pos.push_back(Vec2f(i + 0.5, 0.5));
-        }
-         **/
         _pos_p = std::vector<Vec2f>(_pos.size(), Vec2f(0, 0));
 
         // make sure for the other particle quantities
@@ -197,12 +185,9 @@ public:
     }
 
     void update_spisph() {
-        int max_iter = 35;
+        int max_iter = 7;
         int iter = 0;
-        auto comparison = [](const Vec2f &a, const Vec2f &b) {
-            return a.length() < b.length();
-        };
-        Real _threshold_eta = -0.01 * this->_d0;//1%
+        Real _threshold_eta = 0.01 * this->_d0;//1%
         std::cout << '.' << std::flush;
         //We start by building the neighboor
         buildNeighbor();
@@ -227,11 +212,13 @@ public:
             predictDensityVariation();
             Real beta = (this->_dt * this->_dt) * (this->_m0 * this->_m0) * (2 / (_d[0] * _d[0]));
             Real delta = -1 / (beta * deltaDeno());
-            for (unsigned int i = 0; i < this->nb_particles; ++i) {
+            for (unsigned int i = 0; i < this->particleCount(); ++i) {
                 _p[i] += delta * _d_error[i];
             }
             predictPressureForce();
-        } while (averageDensityVariation() < _threshold_eta && iter < max_iter);
+            std::cout<<averageDensityVariation()<<std::endl;
+            iter++;
+        } while (-averageDensityVariation() > _threshold_eta && iter < max_iter);
         applyPressureForceSPH();
         updateVelocity();
         updatePosition();
@@ -243,13 +230,10 @@ public:
 
     tIndex particleCount() const { return _pos.size(); }
 
-    tIndex boundarCount() const { return _pos_boundary.size(); }
 
     const Vec2f &position(const tIndex i) const {
         return _pos[i];
     }
-
-    const Vec2f &position_boundary(const tIndex i) const { return _pos_boundary[i]; }
 
     const float &color(const tIndex i) const { return _col[i]; }
 
@@ -260,22 +244,21 @@ public:
     int resY() const { return _resY; }
 
     Real equationOfState(const Real d) {
-        return std::max(_p0 * (pow((d / _d0), _gamma) - 1), 0.0);
+        return std::max((_p0 * _d0 / _gamma) * (pow((d / _d0), _gamma) - 1), 0.0);
     }
 
 private:
     void buildNeighbor() {
-        int nb_particles = this->particleCount();
         this->_pidxInGrid.clear();
         this->_pidxInGrid.resize(resX() * resY());
-        for (int i = 0; i < nb_particles; ++i) {
+        for (int i = 0; i < particleCount(); ++i) {
             Vec2f pos = this->position(i);
             this->_pidxInGrid[this->idx1d(floor(pos.x), floor(pos.y))].push_back(i);
         }
     }
 
     void computeDensity() {
-        for (int i = 0; i < this->particleCount(); i++) {
+        for (int i = 0; i < particleCount(); i++) {
             Real x_particle = _pos[i].x;
             Real y_particle = _pos[i].y;
             Real radius = _kernel.supportRadius();
@@ -287,7 +270,7 @@ private:
             int y_higher_bound =
                     floor(radius + y_particle) < this->resY() ? floor(radius + y_particle) : this->resY() - 1;
             // Start iterating through neighbour
-            _d[i] = _eta;
+            _d[i] = 0.001;
             for (unsigned int x = x_lower_bound; x <= x_higher_bound; x++) {
                 for (unsigned int y = y_lower_bound; y <= y_higher_bound; y++) {
                     unsigned int nb_particles_in_cell = _pidxInGrid[idx1d(x, y)].size();
@@ -313,13 +296,14 @@ private:
             int y_higher_bound =
                     floor(radius + y_particle) < this->resY() ? floor(radius + y_particle) : this->resY() - 1;
             // Start iterating through neighbour
-            _d_p[i] = _eta;
+            _d_p[i] = 0;
             for (unsigned int x = x_lower_bound; x <= x_higher_bound; x++) {
                 for (unsigned int y = y_lower_bound; y <= y_higher_bound; y++) {
                     unsigned int nb_particles_in_cell = _pidxInGrid[idx1d(x, y)].size();
                     for (unsigned int m = 0; m < nb_particles_in_cell; ++m) {
+                        int index = _pidxInGrid[idx1d(x, y)][m];
                         _d_p[i] += this->_m0 *
-                                   this->_kernel.w(this->_pos_p[i] - this->_pos_p[_pidxInGrid[idx1d(x, y)][m]]);
+                                   this->_kernel.w(this->_pos_p[i] - this->_pos[index]);
                     }
                 }
             }
@@ -327,7 +311,7 @@ private:
     }
 
     void predictDensityVariation() {
-        for (unsigned int i = 0; i < this->particleCount(); ++i) {
+        for (unsigned int i = 0; i < particleCount(); ++i) {
             _d_error[i] = _d_p[i] - _d[i];
         }
     }
@@ -352,7 +336,7 @@ private:
                 for (unsigned int m = 0; m < nb_particles_in_cell; ++m) {
                     int index = _pidxInGrid[idx1d(x, y)][m];
                     Vec2f xij = this->_pos_p[0] - this->_pos_p[index];
-                    if (index == 0 || xij.length() < 0.09)
+                    if (index == 0 || xij.length() < 0.01)
                         continue;
                     Vec2f gradInter = this->_kernel.grad_w(xij);
                     grad += gradInter;
@@ -364,42 +348,35 @@ private:
     }
 
     void initializePressure() {
-        for (unsigned int i = 0; i < this->nb_particles; ++i) {
-            _p[i] = 0.0f;
-        }
-    }
-
-    void computePressureEstimated() {
-        for (unsigned int i = 0; i < this->nb_particles; ++i) {
-            _p[i] = equationOfState(_d_p[i]);
+        for (int i = 0; i < particleCount(); ++i) {
+            _p[i] = 0;
         }
     }
 
     void computePressure() {
-        for (unsigned int i = 0; i < this->nb_particles; ++i) {
+        for (int i = 0; i < particleCount(); ++i) {
             _p[i] = equationOfState(_d[i]);
         }
     }
 
-
     Real averageDensityVariation() {
         Real avg_var = 0.0f;
-        for (unsigned int i = 0; i < this->nb_particles; ++i) {
-            avg_var += this->_d_error[i];
+        for (unsigned int i = 0; i < this->particleCount(); ++i) {
+            avg_var += std::abs(this->_d_error[i]);
         }
-        return avg_var / this->nb_particles;
+        return avg_var / this->particleCount();
     }
 
 
     void applyBodyForce() {
-        for (unsigned int i = 0; i < this->nb_particles; ++i) {
-            _acc[i] += _g;
+        for (int i = 0; i < this->particleCount(); ++i) {
+            _acc[i] = _g;
         }
     }
 
     void applyPressureForce() {
         Vec2f acc_i = Vec2f(0.0, 0.0);
-        for (unsigned int i = 0; i < nb_particles; i++) {
+        for (unsigned int i = 0; i < particleCount(); i++) {
             Real x_particle = _pos[i].x;
             Real y_particle = _pos[i].y;
             Real val1 = _p[i] / (pow(_d[i], 2));
@@ -423,19 +400,19 @@ private:
                             if (rij.length() < 0.01)
                                 continue;
                             Vec2f grad = this->_kernel.grad_w(rij);
-                            acc_i += this->_m0 * ((val2 + val1) * grad);
+                            acc_i += ((val2 + val1) * grad);
                         }
                     }
                 }
             }
-            _acc[i] -= acc_i;
+            _acc[i] -= this->_m0*acc_i;
             acc_i = Vec2f(0, 0);
         }
     }
 
     void predictPressureForce() {
         Vec2f acc_i = Vec2f(0.0, 0.0);
-        for (unsigned int i = 0; i < nb_particles; i++) {
+        for (unsigned int i = 0; i < particleCount(); i++) {
             Real x_particle = _pos[i].x;
             Real y_particle = _pos[i].y;
             Real val1 = _p[i] / (pow(_d[i], 2));
@@ -470,14 +447,14 @@ private:
     }
 
     void applyPressureForceSPH() {
-        for (unsigned int i = 0; i < this->nb_particles; ++i) {
+        for (unsigned int i = 0; i < this->particleCount(); ++i) {
             this->_acc[i] += this->_acc_p[i];
         }
     }
 
     void applyViscousForce() {
         Vec2f acc_i = Vec2f(0.0, 0.0);
-        for (unsigned int i = 0; i < nb_particles; i++) {
+        for (unsigned int i = 0; i < particleCount(); i++) {
             Real x_particle = _pos[i].x;
             Real y_particle = _pos[i].y;
             Real radius = _kernel.supportRadius();
@@ -493,8 +470,8 @@ private:
                 for (int y = y_lower_bound; y <= y_higher_bound; y++) {
                     int nb_particles_in_cell = _pidxInGrid[idx1d(x, y)].size();
                     for (int m = 0; m < nb_particles_in_cell; ++m) {
-                        if (_pidxInGrid[idx1d(x, y)][m] != i) {
-                            int index = _pidxInGrid[idx1d(x, y)][m];
+                        int index = _pidxInGrid[idx1d(x, y)][m];
+                        if (index != i) {
                             Vec2f uij = this->_vel[i] - this->_vel[index];
                             Vec2f xij = this->_pos[i] - this->_pos[index];
                             if (xij.length() < 0.01)
@@ -513,27 +490,31 @@ private:
     }
 
     void updateVelocity() {
-        for (unsigned int i = 0; i < this->nb_particles; ++i) {
+        for (unsigned int i = 0; i < this->particleCount(); ++i) {
             this->_vel[i] += this->_dt * _acc[i];
             this->_vel[i] = this->_vel[i].x > _c || this->_vel[i].y > _c ? Vec2f(_c, _c) : this->_vel[i];
+            this->_vel[i] = -this->_vel[i].x > _c || -this->_vel[i].y > _c ? Vec2f(-_c, -_c) : this->_vel[i];
+
         }
     }
 
     void predictVelocity() {
-        for (unsigned int i = 0; i < this->nb_particles; ++i) {
+        for (unsigned int i = 0; i < this->particleCount(); ++i) {
             this->_vel_p[i] = this->_vel[i] + this->_dt * (_acc[i] + _acc_p[i]);
             this->_vel_p[i] = this->_vel_p[i].x > _c || this->_vel_p[i].y > _c ? Vec2f(_c, _c) : this->_vel_p[i];
+            this->_vel_p[i] = -this->_vel_p[i].x > _c || -this->_vel_p[i].y > _c ? Vec2f(-_c, -_c) : this->_vel_p[i];
+
         }
     }
 
     void updatePosition() {
-        for (unsigned int i = 0; i < this->nb_particles; ++i) {
+        for (unsigned int i = 0; i < this->particleCount(); ++i) {
             this->_pos[i] += this->_dt * _vel[i];
         }
     }
 
     void predictPosition() {
-        for (unsigned int i = 0; i < this->nb_particles; ++i) {
+        for (unsigned int i = 0; i < this->particleCount(); ++i) {
             this->_pos_p[i] = this->_pos[i] + this->_dt * _vel_p[i];
         }
     }
@@ -541,7 +522,7 @@ private:
     // simple collision detection/resolution for each particle
     void resolveCollision() {
         std::vector<tIndex> need_res;
-        for (tIndex i = 0; i < nb_particles; ++i) {
+        for (tIndex i = 0; i < particleCount(); ++i) {
             if (_pos[i].x < _l || _pos[i].y < _b || _pos[i].x > _r || _pos[i].y > _t)
                 need_res.push_back(i);
         }
@@ -558,7 +539,7 @@ private:
     // simple collision detection/resolution for each particle
     void resolvePredictedCollision() {
         std::vector<tIndex> need_res;
-        for (tIndex i = 0; i < nb_particles; ++i) {
+        for (tIndex i = 0; i < particleCount(); ++i) {
             if (_pos_p[i].x < _l || _pos_p[i].y < _b || _pos_p[i].x > _r || _pos_p[i].y > _t)
                 need_res.push_back(i);
         }
@@ -566,14 +547,14 @@ private:
         for (std::vector<tIndex>::const_iterator it = need_res.begin(); it < need_res.end();
              ++it) {
             const Vec2f p0 = _pos_p[*it];
-            _pos_p[*it].x = clamp(_pos[*it].x, _l, _r);
-            _pos_p[*it].y = clamp(_pos[*it].y, _b, _t);
-            _vel_p[*it] = (_pos[*it] - p0) / _dt;
+            _pos_p[*it].x = clamp(_pos_p[*it].x, _l, _r);
+            _pos_p[*it].y = clamp(_pos_p[*it].y, _b, _t);
+            _vel_p[*it] = (_pos_p[*it] - p0) / _dt;
         }
     }
 
     void updateColor() {
-        for (tIndex i = 0; i < this->nb_particles; ++i) {
+        for (tIndex i = 0; i < this->particleCount(); ++i) {
             _col[i * 4 + 0] = 0.6;
             _col[i * 4 + 1] = 0.6;
             _col[i * 4 + 2] = _d[i] / _d0;
@@ -599,7 +580,6 @@ private:
     std::vector<Vec2f> _acc;      // acceleration
     std::vector<Real> _p;        // pressure
     std::vector<Real> _d;        // density
-    int nb_particles;
 // for PCISPH
     std::vector<Real> _d_p;        // density estimated for t+1
     std::vector<Real> _d_error;    // density error estimated for t+1
