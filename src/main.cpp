@@ -1,6 +1,5 @@
 // ----------------------------------------------------------------------------
 // main.cpp
-//
 //  Created on: 22 Jan 2021
 //      Author: Kiwon Um
 //        Mail: kiwon.um@telecom-paris.fr
@@ -108,10 +107,10 @@ public:
             const Vec2f g = Vec2f(0, -9.8), const Real eta = 0.01, const Real gamma = 7.0) :
             _kernel(h), _nu(nu), _h(h), _d0(density),
             _g(g), _eta(eta), _gamma(gamma) {
-        _dt = 0.0043;
+        _dt = 0.00062;
         _m0 = _d0 * _h * _h;
         _c = std::fabs(_g.y) / _eta;
-        _p0 = 6000000;
+        _p0 = 70000;
     }
 
     // assume an arbitrary grid with the size of res_x*res_y; a fluid mass fill up
@@ -130,6 +129,7 @@ public:
         _t = static_cast<Real>(res_y) - 0.5 * _h;
 
         // sample a fluid mass
+        /**
         for (int j = -f_width / 4; j < f_height / 4; ++j) {
             for (int i = -f_width / 4; i < f_width / 4; ++i) {
                 _pos.push_back(Vec2f(res_x / 2 + i + 0.25, 20 + j + 0.25));
@@ -145,6 +145,15 @@ public:
                 _pos.push_back(Vec2f(i + 0.75, j + 0.25));
                 _pos.push_back(Vec2f(i + 0.25, j + 0.75));
                 _pos.push_back(Vec2f(i + 0.75, j + 0.75));
+            }
+        }**/
+        // sample a fluid mass
+        for(int j=0; j<f_height*2; ++j) {
+            for(int i=0; i<f_width; ++i) {
+                _pos.push_back(Vec2f(i+0.25, j+0.25));
+                _pos.push_back(Vec2f(i+0.75, j+0.25));
+                _pos.push_back(Vec2f(i+0.25, j+0.75));
+                _pos.push_back(Vec2f(i+0.75, j+0.75));
             }
         }
         _pos_p = std::vector<Vec2f>(_pos.size(), Vec2f(0, 0));
@@ -162,26 +171,6 @@ public:
         _vln = std::vector<float>((_pos.size()) * 4, 0.0); // GL_LINES
 
         updateColor();
-    }
-
-    void update() {
-        std::cout << '.' << std::flush;
-        buildNeighbor();
-        computeDensity();
-        computePressure();
-
-        _acc = std::vector<Vec2f>(_pos.size(), Vec2f(0, 0));
-        applyBodyForce();
-        applyPressureForce();
-        applyViscousForce();
-
-        updateVelocity();
-        updatePosition();
-
-        resolveCollision();
-
-        updateColor();
-        if (gShowVel) updateVelLine();
     }
 
     void update_spisph() {
@@ -216,9 +205,8 @@ public:
                 _p[i] += delta * _d_error[i];
             }
             predictPressureForce();
-            std::cout<<averageDensityVariation()<<std::endl;
             iter++;
-        } while (-averageDensityVariation() > _threshold_eta && iter < max_iter);
+        } while (averageDensityVariation() > _threshold_eta && iter < max_iter);
         applyPressureForceSPH();
         updateVelocity();
         updatePosition();
@@ -243,7 +231,7 @@ public:
 
     int resY() const { return _resY; }
 
-    Real equationOfState(const Real d) {
+    Real equationOfState(const Real d) const {
         return std::max((_p0 * _d0 / _gamma) * (pow((d / _d0), _gamma) - 1), 0.0);
     }
 
@@ -303,7 +291,7 @@ private:
                     for (unsigned int m = 0; m < nb_particles_in_cell; ++m) {
                         int index = _pidxInGrid[idx1d(x, y)][m];
                         _d_p[i] += this->_m0 *
-                                   this->_kernel.w(this->_pos_p[i] - this->_pos[index]);
+                                   this->_kernel.w(this->_pos[i] - this->_pos_p[index]);
                     }
                 }
             }
@@ -317,8 +305,8 @@ private:
     }
 
     Real deltaDeno() {
-        Real x_particle = _pos_p[0].x;
-        Real y_particle = _pos_p[0].y;
+        Real x_particle = _pos_p[57].x;
+        Real y_particle = _pos_p[57].y;
         Real radius = _kernel.supportRadius();
         Vec2f grad = Vec2f(0.0, 0.0);
         Real gradSquare = 0.0f;
@@ -335,8 +323,8 @@ private:
                 unsigned int nb_particles_in_cell = _pidxInGrid[idx1d(x, y)].size();
                 for (unsigned int m = 0; m < nb_particles_in_cell; ++m) {
                     int index = _pidxInGrid[idx1d(x, y)][m];
-                    Vec2f xij = this->_pos_p[0] - this->_pos_p[index];
-                    if (index == 0 || xij.length() < 0.01)
+                    Vec2f xij = this->_pos_p[57] - this->_pos_p[index];
+                    if (index == 57 || xij.length() < 0.01)
                         continue;
                     Vec2f gradInter = this->_kernel.grad_w(xij);
                     grad += gradInter;
@@ -374,7 +362,7 @@ private:
         }
     }
 
-    void applyPressureForce() {
+    void predictPressureForce() {
         Vec2f acc_i = Vec2f(0.0, 0.0);
         for (unsigned int i = 0; i < particleCount(); i++) {
             Real x_particle = _pos[i].x;
@@ -405,43 +393,7 @@ private:
                     }
                 }
             }
-            _acc[i] -= this->_m0*acc_i;
-            acc_i = Vec2f(0, 0);
-        }
-    }
-
-    void predictPressureForce() {
-        Vec2f acc_i = Vec2f(0.0, 0.0);
-        for (unsigned int i = 0; i < particleCount(); i++) {
-            Real x_particle = _pos[i].x;
-            Real y_particle = _pos[i].y;
-            Real val1 = _p[i] / (pow(_d[i], 2));
-            Real radius = _kernel.supportRadius();
-            // Compute the neighbours we should take
-            int x_lower_bound = floor(-radius + x_particle) > 0 ? floor(-radius + x_particle) : 0;
-            int x_higher_bound =
-                    floor(radius + x_particle) < this->resX() ? floor(radius + x_particle) : this->resX() - 1;
-            int y_lower_bound = floor(-radius + y_particle) > 0 ? floor(-radius + y_particle) : 0;
-            int y_higher_bound =
-                    floor(radius + y_particle) < this->resY() ? floor(radius + y_particle) : this->resY() - 1;
-            // Start iterating through neighbour
-            for (int x = x_lower_bound; x <= x_higher_bound; x++) {
-                for (int y = y_lower_bound; y <= y_higher_bound; y++) {
-                    int nb_particles_in_cell = _pidxInGrid[idx1d(x, y)].size();
-                    for (int m = 0; m < nb_particles_in_cell; ++m) {
-                        int index = _pidxInGrid[idx1d(x, y)][m];
-                        if (index != i) {
-                            Real val2 = _p[index] / (pow(_d[index], 2));
-                            Vec2f rij = this->_pos[i] - this->_pos[index];
-                            if (rij.length() < 0.01)
-                                continue;
-                            Vec2f grad = this->_kernel.grad_w(rij);
-                            acc_i += this->_m0 * ((val2 + val1) * grad);
-                        }
-                    }
-                }
-            }
-            _acc_p[i] -= acc_i;
+            _acc_p[i] -= this->_m0* acc_i;
             acc_i = Vec2f(0, 0);
         }
     }
@@ -586,9 +538,6 @@ private:
     std::vector<Vec2f> _vel_p;     // velocity
     std::vector<Vec2f> _pos_p;     // position
     std::vector<Vec2f> _acc_p;     // predict pressure force
-
-    std::vector<Vec2f> _pos_boundary; // boundary particle
-
 
 
     std::vector<std::vector<tIndex> > _pidxInGrid; // will help you find neighbor particles
